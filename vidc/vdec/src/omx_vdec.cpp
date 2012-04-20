@@ -4028,12 +4028,19 @@ OMX_ERRORTYPE  omx_vdec::use_output_buffer(
      else {
 
        DEBUG_PRINT_LOW("Use_op_buf: out_pmem=%d",m_use_output_pmem);
-        if (!appData || !bytes ) {
-          if(!secure_mode && !buffer) {
-              DEBUG_PRINT_ERROR("\n Bad parameters for use buffer in EGL image case");
-              return OMX_ErrorBadParameter;
-          }
-        }
+
+       if (!appData || !bytes )
+       {
+         DEBUG_PRINT_ERROR("\n Invalid appData or bytes");
+         return OMX_ErrorBadParameter;
+       }
+
+       if(!secure_mode && !buffer)
+       {
+         DEBUG_PRINT_ERROR("\n Bad parameters for use buffer in EGL image case");
+         return OMX_ErrorBadParameter;
+       }
+
 
         OMX_QCOM_PLATFORM_PRIVATE_LIST *pmem_list;
         OMX_QCOM_PLATFORM_PRIVATE_PMEM_INFO *pmem_info;
@@ -4177,11 +4184,15 @@ OMX_ERRORTYPE  omx_vdec::use_buffer(
 
   if (bufferHdr == NULL || bytes == 0)
   {
-      if(!secure_mode && buffer == NULL) {
-          DEBUG_PRINT_ERROR("bad param 0x%p %ld 0x%p",bufferHdr, bytes, buffer);
-          return OMX_ErrorBadParameter;
-      }
+      DEBUG_PRINT_ERROR("bad param 0x%p %ld",bufferHdr, bytes);
+      return OMX_ErrorBadParameter;
   }
+
+  if(!secure_mode && buffer == NULL) {
+      DEBUG_PRINT_ERROR("bad param 0x%p",buffer);
+      return OMX_ErrorBadParameter;
+  }
+
   if(m_state == OMX_StateInvalid)
   {
     DEBUG_PRINT_ERROR("Use Buffer in Invalid State\n");
