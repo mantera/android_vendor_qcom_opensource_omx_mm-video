@@ -1,5 +1,5 @@
 /*--------------------------------------------------------------------------
-Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -67,6 +67,7 @@ public:
   bool venc_set_param(void *,OMX_INDEXTYPE);
   bool venc_set_config(void *configData, OMX_INDEXTYPE index);
   bool venc_get_profile_level(OMX_U32 *eProfile,OMX_U32 *eLevel);
+  bool venc_max_allowed_bitrate_check(OMX_U32 nTargetBitrate);
   OMX_U32 m_nDriver_fd;
   bool m_profile_set;
   bool m_level_set;
@@ -85,6 +86,9 @@ public:
 
   recon_buffer recon_buff[MAX_RECON_BUFFERS];
   int recon_buffers_count;
+  bool m_max_allowed_bitrate_check;
+  int m_eProfile;
+  int m_eLevel;
 
 private:
   struct venc_basecfg             m_sVenc_cfg;
@@ -110,6 +114,7 @@ private:
   bool venc_set_target_bitrate(OMX_U32 nTargetBitrate, OMX_U32 config);
   bool venc_set_ratectrl_cfg(OMX_VIDEO_CONTROLRATETYPE eControlRate);
   bool venc_set_session_qp(OMX_U32 i_frame_qp, OMX_U32 p_frame_qp);
+  bool venc_set_extradata(OMX_U32 extra_data);
   bool venc_set_encode_framerate(OMX_U32 encode_framerate, OMX_U32 config);
   bool venc_set_intra_vop_refresh(OMX_BOOL intra_vop_refresh);
   bool venc_set_color_format(OMX_COLOR_FORMATTYPE color_format);

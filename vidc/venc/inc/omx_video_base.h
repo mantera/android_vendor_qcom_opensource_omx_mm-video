@@ -1,5 +1,5 @@
 /*--------------------------------------------------------------------------
-Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -504,6 +504,8 @@ public:
   QOMX_VIDEO_INTRAPERIODTYPE m_sIntraperiod;
   OMX_VIDEO_PARAM_ERRORCORRECTIONTYPE m_sErrorCorrection;
   OMX_VIDEO_PARAM_INTRAREFRESHTYPE m_sIntraRefresh;
+  OMX_U32 m_sExtraData;
+  OMX_U32 m_sDebugSliceinfo;
 
   // fill this buffer queue
   omx_cmd_queue         m_ftb_q;
@@ -539,7 +541,7 @@ public:
 private:
 #ifdef USE_ION
   int alloc_map_ion_memory(int size,struct ion_allocation_data *alloc_data,
-                                    struct ion_fd_data *fd_data);
+                                    struct ion_fd_data *fd_data,int flag);
   void free_ion_memory(struct venc_ion *buf_ion_info);
 #endif
 };
