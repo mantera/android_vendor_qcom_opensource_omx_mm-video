@@ -77,7 +77,6 @@ ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define EGL_BUFFER_HANDLE_QCOM 0x4F00
 #define EGL_BUFFER_OFFSET_QCOM 0x4F01
 #endif
-
 #ifdef INPUT_BUFFER_LOG
 #define INPUT_BUFFER_FILE_NAME "/data/input-bitstream.\0\0\0\0"
 #define INPUT_BUFFER_FILE_NAME_LEN 30
@@ -94,7 +93,9 @@ char ouputextradatafilename [] = "/data/extradata";
 #endif
 
 #define DEFAULT_FPS 30
-#define MAX_INPUT_ERROR DEFAULT_FPS
+#define MAX_NUM_SPS 32
+#define MAX_NUM_PPS 256
+#define MAX_INPUT_ERROR (MAX_NUM_SPS + MAX_NUM_PPS)
 #define MAX_SUPPORTED_FPS 120
 
 #define VC1_SP_MP_START_CODE        0xC5000000
@@ -761,7 +762,7 @@ void omx_vdec::process_event_cb(void *ctxt, unsigned char id)
                DEBUG_PRINT_ERROR("\n empty_buffer_done failure");
                pThis->omx_report_error ();
             }
-            if(!pThis->arbitrary_bytes && pThis->m_inp_err_count >= MAX_INPUT_ERROR)
+            if(!pThis->arbitrary_bytes && pThis->m_inp_err_count > MAX_INPUT_ERROR)
             {
                DEBUG_PRINT_ERROR("\n Input bitstream error for consecutive %d frames.", MAX_INPUT_ERROR);
                pThis->omx_report_error ();
@@ -1148,6 +1149,8 @@ OMX_ERRORTYPE omx_vdec::component_init(OMX_STRING role)
   OMX_ERRORTYPE eRet = OMX_ErrorNone;
   struct vdec_ioctl_msg ioctl_msg = {NULL,NULL};
   unsigned int   alignment = 0,buffer_size = 0;
+  int is_secure = 0;
+  int i = 0;
   int fds[2];
   int r;
   OMX_STRING device_name = "/dev/msm_vidc_dec";
@@ -1157,6 +1160,7 @@ OMX_ERRORTYPE omx_vdec::component_init(OMX_STRING role)
       arbitrary_bytes = false;
       role = "OMX.qcom.video.decoder.avc";
       device_name =  "/dev/msm_vidc_dec_sec";
+	  is_secure = 1;
   }
   DEBUG_PRINT_HIGH("\n omx_vdec::component_init(): Start of New Playback : role  = %s : DEVICE = %s",
         role, device_name);
@@ -1170,6 +1174,15 @@ OMX_ERRORTYPE omx_vdec::component_init(OMX_STRING role)
     drv_ctx.video_driver_fd = open(device_name, O_RDWR | O_NONBLOCK);
   }
 
+  if(is_secure && drv_ctx.video_driver_fd < 0) {
+	  do {
+		  usleep(100 * 1000);
+		  drv_ctx.video_driver_fd = open(device_name, O_RDWR | O_NONBLOCK);
+		  if (drv_ctx.video_driver_fd > 0) {
+			  break;
+		  }
+	  } while(i++ < 50);
+  }
   if(drv_ctx.video_driver_fd < 0)
   {
       DEBUG_PRINT_ERROR("Omx_vdec::Comp Init Returning failure, errno %d\n", errno);
@@ -1243,7 +1256,13 @@ OMX_ERRORTYPE omx_vdec::component_init(OMX_STRING role)
      eCompressionFormat = (OMX_VIDEO_CODINGTYPE)QOMX_VIDEO_CodingDivx;
      codec_type_parse = CODEC_TYPE_DIVX;
      m_frame_parser.init_start_codes (codec_type_parse);
-
+#ifdef _ANDROID_
+     OMX_ERRORTYPE err = createDivxDrmContext();
+     if( err != OMX_ErrorNone ) {
+         DEBUG_PRINT_ERROR("createDivxDrmContext Failed");
+         return err;
+     }
+#endif //_ANDROID_
   }
   else if(!strncmp(drv_ctx.kind, "OMX.qcom.video.decoder.divx4",\
          OMX_MAX_STRINGNAME_SIZE))
@@ -1254,7 +1273,13 @@ OMX_ERRORTYPE omx_vdec::component_init(OMX_STRING role)
      eCompressionFormat = (OMX_VIDEO_CODINGTYPE)QOMX_VIDEO_CodingDivx;
      codec_type_parse = CODEC_TYPE_DIVX;
      m_frame_parser.init_start_codes (codec_type_parse);
-
+#ifdef _ANDROID_
+     OMX_ERRORTYPE err = createDivxDrmContext();
+     if( err != OMX_ErrorNone ) {
+         DEBUG_PRINT_ERROR("createDivxDrmContext Failed");
+         return err;
+     }
+#endif //_ANDROID_
   }
   else if(!strncmp(drv_ctx.kind, "OMX.qcom.video.decoder.divx",\
          OMX_MAX_STRINGNAME_SIZE))
@@ -1265,7 +1290,13 @@ OMX_ERRORTYPE omx_vdec::component_init(OMX_STRING role)
      eCompressionFormat = (OMX_VIDEO_CODINGTYPE)QOMX_VIDEO_CodingDivx;
      codec_type_parse = CODEC_TYPE_DIVX;
      m_frame_parser.init_start_codes (codec_type_parse);
-
+#ifdef _ANDROID_
+     OMX_ERRORTYPE err = createDivxDrmContext();
+     if( err != OMX_ErrorNone ) {
+         DEBUG_PRINT_ERROR("createDivxDrmContext Failed");
+         return err;
+     }
+#endif //_ANDROID_
   }
 #else
   else if((!strncmp(drv_ctx.kind, "OMX.qcom.video.decoder.divx4",\
@@ -1279,6 +1310,13 @@ OMX_ERRORTYPE omx_vdec::component_init(OMX_STRING role)
      codec_type_parse = CODEC_TYPE_DIVX;
      m_frame_parser.init_start_codes (codec_type_parse);
 
+#ifdef _ANDROID_
+     OMX_ERRORTYPE err = createDivxDrmContext();
+     if( err != OMX_ErrorNone ) {
+         DEBUG_PRINT_ERROR("createDivxDrmContext Failed");
+         return err;
+     }
+#endif //_ANDROID_
   }
 #endif
   else if(!strncmp(drv_ctx.kind, "OMX.qcom.video.decoder.avc",\
@@ -2789,9 +2827,10 @@ OMX_ERRORTYPE  omx_vdec::get_parameter(OMX_IN OMX_HANDLETYPE     hComp,
 #ifdef USE_ION
                 if(secure_mode) {
                         nativeBuffersUsage->nUsage = (GRALLOC_USAGE_PRIVATE_MM_HEAP | GRALLOC_USAGE_PROTECTED |
-                                                      GRALLOC_USAGE_PRIVATE_UNCACHED);
+                                                      GRALLOC_USAGE_PRIVATE_CP_BUFFER | GRALLOC_USAGE_PRIVATE_UNCACHED);
                 } else {
-                        nativeBuffersUsage->nUsage = (GRALLOC_USAGE_PRIVATE_MM_HEAP | GRALLOC_USAGE_PRIVATE_UNCACHED);
+                        nativeBuffersUsage->nUsage = (GRALLOC_USAGE_PRIVATE_MM_HEAP |
+                                                         GRALLOC_USAGE_PRIVATE_IOMMU_HEAP);
                 }
 #else
 #if defined (MAX_RES_720P) ||  defined (MAX_RES_1080P_EBI)
@@ -3345,15 +3384,12 @@ OMX_ERRORTYPE  omx_vdec::set_parameter(OMX_IN OMX_HANDLETYPE     hComp,
       break;
     case OMX_QcomIndexParamVideoDivx:
       {
-        QOMX_VIDEO_PARAM_DIVXTYPE* divXType = (QOMX_VIDEO_PARAM_DIVXTYPE *) paramData;
 #ifdef MAX_RES_720P
-        if(divXType->eFormat == QOMX_VIDEO_DIVXFormat311) {
+        QOMX_VIDEO_PARAM_DIVXTYPE* divXType = (QOMX_VIDEO_PARAM_DIVXTYPE *) paramData;
+        if((divXType) && (divXType->eFormat == QOMX_VIDEO_DIVXFormat311)) {
             DEBUG_PRINT_HIGH("set_parameter: DivX 3.11 not supported in 7x30 core.");
             eRet = OMX_ErrorUnsupportedSetting;
         }
-#endif
-#ifdef _ANDROID_
-         createDivxDrmContext( divXType->pDrmHandle );
 #endif
       }
       break;
@@ -3942,7 +3978,7 @@ OMX_ERRORTYPE  omx_vdec::use_output_buffer(
         drv_ctx.op_buf_ion_info[i].ion_device_fd = alloc_map_ion_memory(
                 drv_ctx.op_buf.buffer_size,drv_ctx.op_buf.alignment,
                 &drv_ctx.op_buf_ion_info[i].ion_alloc_data,
-                &drv_ctx.op_buf_ion_info[i].fd_ion_data);
+                &drv_ctx.op_buf_ion_info[i].fd_ion_data,CACHED);
         if(drv_ctx.op_buf_ion_info[i].ion_device_fd < 0) {
           return OMX_ErrorInsufficientResources;
         }
@@ -3993,12 +4029,19 @@ OMX_ERRORTYPE  omx_vdec::use_output_buffer(
      else {
 
        DEBUG_PRINT_LOW("Use_op_buf: out_pmem=%d",m_use_output_pmem);
-        if (!appData || !bytes ) {
-          if(!secure_mode && !buffer) {
-              DEBUG_PRINT_ERROR("\n Bad parameters for use buffer in EGL image case");
-              return OMX_ErrorBadParameter;
-          }
-        }
+
+       if (!appData || !bytes )
+       {
+         DEBUG_PRINT_ERROR("\n Invalid appData or bytes");
+         return OMX_ErrorBadParameter;
+       }
+
+       if(!secure_mode && !buffer)
+       {
+         DEBUG_PRINT_ERROR("\n Bad parameters for use buffer in EGL image case");
+         return OMX_ErrorBadParameter;
+       }
+
 
         OMX_QCOM_PLATFORM_PRIVATE_LIST *pmem_list;
         OMX_QCOM_PLATFORM_PRIVATE_PMEM_INFO *pmem_info;
@@ -4142,11 +4185,15 @@ OMX_ERRORTYPE  omx_vdec::use_buffer(
 
   if (bufferHdr == NULL || bytes == 0)
   {
-      if(!secure_mode && buffer == NULL) {
-          DEBUG_PRINT_ERROR("bad param 0x%p %ld 0x%p",bufferHdr, bytes, buffer);
-          return OMX_ErrorBadParameter;
-      }
+      DEBUG_PRINT_ERROR("bad param 0x%p %ld",bufferHdr, bytes);
+      return OMX_ErrorBadParameter;
   }
+
+  if(!secure_mode && buffer == NULL) {
+      DEBUG_PRINT_ERROR("bad param 0x%p",buffer);
+      return OMX_ErrorBadParameter;
+  }
+
   if(m_state == OMX_StateInvalid)
   {
     DEBUG_PRINT_ERROR("Use Buffer in Invalid State\n");
@@ -4519,7 +4566,7 @@ OMX_ERRORTYPE  omx_vdec::allocate_input_buffer(
  drv_ctx.ip_buf_ion_info[i].ion_device_fd = alloc_map_ion_memory(
                     drv_ctx.ip_buf.buffer_size,drv_ctx.op_buf.alignment,
                     &drv_ctx.ip_buf_ion_info[i].ion_alloc_data,
-		    &drv_ctx.ip_buf_ion_info[i].fd_ion_data);
+		    &drv_ctx.ip_buf_ion_info[i].fd_ion_data,CACHED);
     if(drv_ctx.ip_buf_ion_info[i].ion_device_fd < 0) {
         return OMX_ErrorInsufficientResources;
      }
@@ -4644,11 +4691,6 @@ OMX_ERRORTYPE  omx_vdec::allocate_output_buffer(
   unsigned                         i= 0; // Temporary counter
   struct vdec_ioctl_msg ioctl_msg = {NULL,NULL};
   struct vdec_setbuffer_cmd setbuffers;
-#ifdef USE_ION
-  int ion_device_fd =-1;
-  struct ion_allocation_data ion_alloc_data;
-  struct ion_fd_data fd_ion_data;
-#endif
 
   int nBufHdrSize        = 0;
   int nPlatformEntrySize = 0;
@@ -4807,13 +4849,13 @@ OMX_ERRORTYPE  omx_vdec::allocate_output_buffer(
         drv_ctx.ptr_respbuffer = NULL;
       }
 #ifdef USE_ION
-    if (drv_ctx.op_buf_ion_info) {
+      if (drv_ctx.op_buf_ion_info) {
         DEBUG_PRINT_LOW("\n Free o/p ion context");
 	free(drv_ctx.op_buf_ion_info);
         drv_ctx.op_buf_ion_info = NULL;
-    }
+      }
 #endif
-      eRet =  OMX_ErrorInsufficientResources;
+      return OMX_ErrorInsufficientResources;
     }
   }
 
@@ -4834,7 +4876,7 @@ OMX_ERRORTYPE  omx_vdec::allocate_output_buffer(
     drv_ctx.op_buf_ion_info[i].ion_device_fd = alloc_map_ion_memory(
                     drv_ctx.op_buf.buffer_size,drv_ctx.op_buf.alignment,
                     &drv_ctx.op_buf_ion_info[i].ion_alloc_data,
-                    &drv_ctx.op_buf_ion_info[i].fd_ion_data);
+                    &drv_ctx.op_buf_ion_info[i].fd_ion_data,CACHED);
     if (drv_ctx.op_buf_ion_info[i].ion_device_fd < 0) {
         return OMX_ErrorInsufficientResources;
      }
@@ -4900,10 +4942,10 @@ OMX_ERRORTYPE  omx_vdec::allocate_output_buffer(
 #ifdef _ANDROID_
 #ifdef USE_ION
     m_heap_ptr[i].video_heap_ptr = new VideoHeap (pmem_fd,
-                                drv_ctx.op_buf.buffer_size,
-                                pmem_baseaddress,
-                                ion_alloc_data.handle,
-                                pmem_fd);
+                               drv_ctx.op_buf.buffer_size,
+                               pmem_baseaddress,
+                               drv_ctx.op_buf_ion_info[i].ion_alloc_data.handle,
+                               pmem_fd);
     m_heap_count = m_heap_count + 1;
 #else
     m_heap_ptr[i].video_heap_ptr = new VideoHeap (pmem_fd,
@@ -5464,6 +5506,7 @@ OMX_ERRORTYPE  omx_vdec::empty_this_buffer_proxy(OMX_IN OMX_HANDLETYPE         h
       frameinfo.flags |= buffer->nFlags;
   }
 
+
 #ifdef _ANDROID_
   if (m_debug_timestamp)
   {
@@ -5510,7 +5553,6 @@ OMX_ERRORTYPE  omx_vdec::empty_this_buffer_proxy(OMX_IN OMX_HANDLETYPE         h
     memset(m_demux_offsets, 0, ( sizeof(OMX_U32) * 8192) );
     m_demux_entries = 0;
   }
-
   DEBUG_PRINT_LOW("[ETBP] pBuf(%p) nTS(%lld) Sz(%d)",
     frameinfo.bufferaddr, frameinfo.timestamp, frameinfo.datalen);
   ioctl_msg.in = &frameinfo;
@@ -6626,6 +6668,7 @@ int omx_vdec::async_message_process (void *context, void* message)
         output_respbuf->pic_type = vdec_msg->msgdata.output_frame.pic_type;
         output_respbuf->interlaced_format = vdec_msg->msgdata.output_frame.interlaced_format;
 
+
         if (omx->output_use_buffer)
           memcpy ( omxhdr->pBuffer,
                    (vdec_msg->msgdata.output_frame.bufferaddr +
@@ -7250,19 +7293,26 @@ bool omx_vdec::align_pmem_buffers(int pmem_fd, OMX_U32 buffer_size,
 #ifdef USE_ION
 int omx_vdec::alloc_map_ion_memory(OMX_U32 buffer_size,
               OMX_U32 alignment, struct ion_allocation_data *alloc_data,
-	      struct ion_fd_data *fd_data)
+	      struct ion_fd_data *fd_data,int flag)
 {
   int fd = -EINVAL;
   int rc = -EINVAL;
+  int ion_dev_flag;
   struct vdec_ion ion_buf_info;
   if (!alloc_data || buffer_size <= 0 || !fd_data) {
      DEBUG_PRINT_ERROR("Invalid arguments to alloc_map_ion_memory\n");
      return -EINVAL;
   }
-  fd = open (MEM_DEVICE, O_RDONLY | O_DSYNC);
+  if(!secure_mode && flag == CACHED)
+  {
+     ion_dev_flag = O_RDONLY;
+  } else {
+     ion_dev_flag = (O_RDONLY | O_DSYNC);
+  }
+  fd = open (MEM_DEVICE, ion_dev_flag);
   if (fd < 0) {
-    DEBUG_PRINT_ERROR("opening ion device failed with fd = %d\n", fd);
-    return fd;
+     DEBUG_PRINT_ERROR("opening ion device failed with fd = %d\n", fd);
+     return fd;
   }
   alloc_data->len = buffer_size;
   alloc_data->align = clip2(alignment);
@@ -7273,7 +7323,7 @@ int omx_vdec::alloc_map_ion_memory(OMX_U32 buffer_size,
   if(secure_mode) {
     alloc_data->flags = (ION_HEAP(MEM_HEAP_ID) | ION_SECURE);
   } else {
-    alloc_data->flags = ION_HEAP(MEM_HEAP_ID);
+    alloc_data->flags = (ION_HEAP(MEM_HEAP_ID) | ION_HEAP(ION_IOMMU_HEAP_ID));
   }
   rc = ioctl(fd,ION_IOC_ALLOC,alloc_data);
   if (rc || !alloc_data->handle) {
@@ -7604,8 +7654,8 @@ OMX_ERRORTYPE omx_vdec::update_portdef(OMX_PARAM_PORTDEFINITIONTYPE *portDefn)
   portDefn->format.video.nStride = drv_ctx.video_resolution.stride;
   portDefn->format.video.nSliceHeight = drv_ctx.video_resolution.scan_lines;
   DEBUG_PRINT_LOW("update_portdef Width = %d Height = %d Stride = %u"
-    "SliceHeight = %u \n", portDefn->format.video.nFrameHeight,
-    portDefn->format.video.nFrameWidth,
+    "SliceHeight = %u \n", portDefn->format.video.nFrameWidth,
+    portDefn->format.video.nFrameHeight,
     portDefn->format.video.nStride,
     portDefn->format.video.nSliceHeight);
   return eRet;
@@ -7911,7 +7961,7 @@ void omx_vdec::handle_extradata(OMX_BUFFERHEADERTYPE *p_buf_hdr)
                           p_extra->nSize, p_extra->nDataSize);
         p_extra = (OMX_OTHER_EXTRADATATYPE *) (((OMX_U8 *) p_extra) + p_extra->nSize);
         if ((OMX_U8*)p_extra > (p_buf_hdr->pBuffer + p_buf_hdr->nAllocLen) ||
-            p_extra->nDataSize == 0)
+            p_extra->nDataSize == 0 || p_extra->nSize == 0)
           p_extra = NULL;
           continue;
       }
@@ -7947,7 +7997,7 @@ void omx_vdec::handle_extradata(OMX_BUFFERHEADERTYPE *p_buf_hdr)
       print_debug_extradata(p_extra);
       p_extra = (OMX_OTHER_EXTRADATATYPE *) (((OMX_U8 *) p_extra) + p_extra->nSize);
       if ((OMX_U8*)p_extra > (p_buf_hdr->pBuffer + p_buf_hdr->nAllocLen) ||
-          p_extra->nDataSize == 0)
+          p_extra->nDataSize == 0 || p_extra->nSize == 0)
         p_extra = NULL;
     }
     if (!(client_extradata & VDEC_EXTRADATA_MB_ERROR_MAP))
@@ -8493,7 +8543,7 @@ OMX_ERRORTYPE omx_vdec::vdec_alloc_h264_mv()
  drv_ctx.h264_mv.ion_device_fd = alloc_map_ion_memory(
                     allocation.size, allocation.align,
                     &drv_ctx.h264_mv.ion_alloc_data,
-                    &drv_ctx.h264_mv.fd_ion_data);
+                    &drv_ctx.h264_mv.fd_ion_data,CACHED);
   if (drv_ctx.h264_mv.ion_device_fd < 0) {
         return OMX_ErrorInsufficientResources;
   }
@@ -8579,28 +8629,21 @@ void omx_vdec::vdec_dealloc_h264_mv()
 #endif
 
 #ifdef _ANDROID_
-OMX_ERRORTYPE omx_vdec::createDivxDrmContext( OMX_PTR drmHandle )
+OMX_ERRORTYPE omx_vdec::createDivxDrmContext()
 {
      OMX_ERRORTYPE err = OMX_ErrorNone;
-     if( drmHandle == NULL ) {
-        DEBUG_PRINT_HIGH("\n This clip is not DRM encrypted");
-        iDivXDrmDecrypt = NULL;
-        return err;
-     }
-
-     iDivXDrmDecrypt = DivXDrmDecrypt::Create( drmHandle );
+     iDivXDrmDecrypt = DivXDrmDecrypt::Create();
      if (iDivXDrmDecrypt) {
-          DEBUG_PRINT_LOW("\nCreated DIVX DRM, now calling Init");
           OMX_ERRORTYPE err = iDivXDrmDecrypt->Init();
           if(err!=OMX_ErrorNone) {
-            DEBUG_PRINT_ERROR("\nERROR:iDivXDrmDecrypt->Init %d", err);
+            DEBUG_PRINT_ERROR("\nERROR :iDivXDrmDecrypt->Init %d", err);
             delete iDivXDrmDecrypt;
             iDivXDrmDecrypt = NULL;
           }
      }
      else {
           DEBUG_PRINT_ERROR("\nUnable to Create DIVX DRM");
-          return OMX_ErrorUndefined;
+          err = OMX_ErrorUndefined;
      }
      return err;
 }
