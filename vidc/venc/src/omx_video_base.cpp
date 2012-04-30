@@ -538,6 +538,24 @@ void omx_video::process_event_cb(void *ctxt, unsigned char id)
               pThis->omx_report_error ();
             }
           }
+          else if (BITMASK_PRESENT(&pThis->m_flags,
+                                   OMX_COMPONENT_LOADED_START_PENDING))
+          {
+            if(dev_loaded_start_done())
+            {
+              DEBUG_PRINT_LOW("successful loaded Start Done!");
+            }
+            else
+            {
+              DEBUG_PRINT_ERROR("ERROR: failed in loaded Start Done!");
+              pThis->omx_report_error ();
+            }
+            BITMASK_CLEAR((&pThis->m_flags),OMX_COMPONENT_LOADED_START_PENDING);
+          }
+          else
+          {
+            DEBUG_PRINT_ERROR("\nERROR: unknown flags=%x\n",pThis->m_flags);
+          }
         }
         else
         {
@@ -594,6 +612,24 @@ void omx_video::process_event_cb(void *ctxt, unsigned char id)
             pThis->m_pCallbacks.EventHandler(&pThis->m_cmp,pThis->m_app_data,
                                              OMX_EventCmdComplete,OMX_CommandStateSet,
                                              OMX_StateIdle,NULL);
+          }
+          else if (BITMASK_PRESENT(&pThis->m_flags,
+                                   OMX_COMPONENT_LOADED_STOP_PENDING))
+          {
+            if(dev_loaded_stop_done())
+            {
+              DEBUG_PRINT_LOW("successful loaded Stop Done!");
+            }
+            else
+            {
+              DEBUG_PRINT_ERROR("ERROR: failed in loaded Stop Done!");
+              pThis->omx_report_error ();
+            }
+            BITMASK_CLEAR((&pThis->m_flags),OMX_COMPONENT_LOADED_STOP_PENDING);
+          }
+          else
+          {
+            DEBUG_PRINT_ERROR("\nERROR: unknown flags=%x\n",pThis->m_flags);
           }
         }
 
@@ -1713,6 +1749,50 @@ OMX_ERRORTYPE  omx_video::get_parameter(OMX_IN OMX_HANDLETYPE     hComp,
       break;
     }
 #endif
+  case QOMX_IndexParamVideoSyntaxHdr:
+    {
+       DEBUG_PRINT_HIGH("QOMX_IndexParamVideoSyntaxHdr");
+       QOMX_EXTNINDEX_PARAMTYPE* pParam =
+          reinterpret_cast<QOMX_EXTNINDEX_PARAMTYPE*>(paramData);
+       BITMASK_SET(&m_flags, OMX_COMPONENT_LOADED_START_PENDING);
+       if(dev_loaded_start())
+       {
+         DEBUG_PRINT_LOW("device start successful");
+       }
+       else
+       {
+         DEBUG_PRINT_ERROR("device start failed");
+         BITMASK_CLEAR(&m_flags, OMX_COMPONENT_LOADED_START_PENDING);
+         return OMX_ErrorHardware;
+       }
+       if(dev_get_seq_hdr(pParam->pData,
+            (unsigned)(pParam->nSize - sizeof(QOMX_EXTNINDEX_PARAMTYPE)),
+            (unsigned *)&pParam->nDataSize))
+       {
+         DEBUG_PRINT_HIGH("get syntax header successful (hdrlen = %d)",
+            pParam->nDataSize);
+         for (unsigned i = 0; i < pParam->nDataSize; i++) {
+           DEBUG_PRINT_LOW("Header[%d] = %x", i, *((char *)pParam->pData + i));
+         }
+       }
+       else
+       {
+         DEBUG_PRINT_ERROR("Error returned from GetSyntaxHeader()");
+         eRet = OMX_ErrorHardware;
+       }
+       BITMASK_SET(&m_flags, OMX_COMPONENT_LOADED_STOP_PENDING);
+       if(dev_loaded_stop())
+       {
+         DEBUG_PRINT_LOW("device stop successful");
+       }
+       else
+       {
+         DEBUG_PRINT_ERROR("device stop failed");
+         BITMASK_CLEAR(&m_flags, OMX_COMPONENT_LOADED_STOP_PENDING);
+         eRet = OMX_ErrorHardware;
+       }
+       break;
+    }
   case OMX_IndexParamVideoSliceFMO:
   default:
     {
@@ -4080,7 +4160,8 @@ int omx_video::alloc_map_ion_memory(int size,struct ion_allocation_data *alloc_d
         }
         alloc_data->len = size;
         alloc_data->align = 4096;
-        alloc_data->flags = 0x1 << MEM_HEAP_ID;
+        alloc_data->flags = (ION_HEAP(MEM_HEAP_ID) |
+                              ION_HEAP(ION_IOMMU_HEAP_ID));
         rc = ioctl(ion_device_fd,ION_IOC_ALLOC,alloc_data);
         if(rc || !alloc_data->handle) {
            DEBUG_PRINT_ERROR("\n ION ALLOC memory failed ");

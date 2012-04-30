@@ -2827,9 +2827,10 @@ OMX_ERRORTYPE  omx_vdec::get_parameter(OMX_IN OMX_HANDLETYPE     hComp,
 #ifdef USE_ION
                 if(secure_mode) {
                         nativeBuffersUsage->nUsage = (GRALLOC_USAGE_PRIVATE_MM_HEAP | GRALLOC_USAGE_PROTECTED |
-                                                      GRALLOC_USAGE_PRIVATE_UNCACHED);
+                                                      GRALLOC_USAGE_PRIVATE_CP_BUFFER | GRALLOC_USAGE_PRIVATE_UNCACHED);
                 } else {
-                        nativeBuffersUsage->nUsage = (GRALLOC_USAGE_PRIVATE_MM_HEAP);
+                        nativeBuffersUsage->nUsage = (GRALLOC_USAGE_PRIVATE_MM_HEAP |
+                                                         GRALLOC_USAGE_PRIVATE_IOMMU_HEAP);
                 }
 #else
 #if defined (MAX_RES_720P) ||  defined (MAX_RES_1080P_EBI)
@@ -7322,7 +7323,7 @@ int omx_vdec::alloc_map_ion_memory(OMX_U32 buffer_size,
   if(secure_mode) {
     alloc_data->flags = (ION_HEAP(MEM_HEAP_ID) | ION_SECURE);
   } else {
-    alloc_data->flags = ION_HEAP(MEM_HEAP_ID);
+    alloc_data->flags = (ION_HEAP(MEM_HEAP_ID) | ION_HEAP(ION_IOMMU_HEAP_ID));
   }
   rc = ioctl(fd,ION_IOC_ALLOC,alloc_data);
   if (rc || !alloc_data->handle) {
@@ -8542,7 +8543,7 @@ OMX_ERRORTYPE omx_vdec::vdec_alloc_h264_mv()
  drv_ctx.h264_mv.ion_device_fd = alloc_map_ion_memory(
                     allocation.size, allocation.align,
                     &drv_ctx.h264_mv.ion_alloc_data,
-                    &drv_ctx.h264_mv.fd_ion_data,UNCACHED);
+                    &drv_ctx.h264_mv.fd_ion_data,CACHED);
   if (drv_ctx.h264_mv.ion_device_fd < 0) {
         return OMX_ErrorInsufficientResources;
   }
