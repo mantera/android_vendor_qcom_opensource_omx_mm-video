@@ -1,5 +1,5 @@
 /*--------------------------------------------------------------------------
-Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -144,13 +144,19 @@ char outputfilename [] = "/data/output-bitstream.\0\0\0\0";
 //constructor
 venc_dev::venc_dev()
 {
-//nothing to do
-
+  m_max_allowed_bitrate_check = false;
+  m_eLevel = 0;
+  m_eProfile = 0;
+  pthread_mutex_init(&loaded_start_stop_mlock, NULL);
+  pthread_cond_init (&loaded_start_stop_cond, NULL);
+  DEBUG_PRINT_LOW("venc_dev constructor");
 }
 
 venc_dev::~venc_dev()
 {
-  //nothing to do
+  pthread_cond_destroy(&loaded_start_stop_cond);
+  pthread_mutex_destroy(&loaded_start_stop_mlock);
+  DEBUG_PRINT_LOW("venc_dev distructor");
 }
 
 void* async_venc_message_thread (void *input)
@@ -369,6 +375,125 @@ bool venc_dev::venc_set_buf_req(unsigned long *min_buff_count,
 
   return true;
 
+}
+
+bool venc_dev::venc_loaded_start()
+{
+  struct timespec ts;
+  int status = 0;
+  if(ioctl (m_nDriver_fd,VEN_IOCTL_CMD_START, NULL) < 0)
+  {
+    DEBUG_PRINT_ERROR("ERROR: VEN_IOCTL_CMD_START failed");
+    return false;
+  }
+  if (clock_gettime(CLOCK_REALTIME, &ts) < 0)
+  {
+    DEBUG_PRINT_ERROR("%s: clock_gettime failed", __func__);
+    return false;
+  }
+  ts.tv_sec += 1;
+  pthread_mutex_lock(&loaded_start_stop_mlock);
+  DEBUG_PRINT_LOW("%s: wait on start done", __func__);
+  status = pthread_cond_timedwait(&loaded_start_stop_cond,
+                &loaded_start_stop_mlock, &ts);
+  if (status != 0)
+  {
+    DEBUG_PRINT_ERROR("%s: error status = %d, %s", __func__,
+        status, strerror(status));
+    pthread_mutex_unlock(&loaded_start_stop_mlock);
+    return false;
+  }
+  DEBUG_PRINT_LOW("%s: wait over on start done", __func__);
+  pthread_mutex_unlock(&loaded_start_stop_mlock);
+  DEBUG_PRINT_LOW("%s: venc_loaded_start success", __func__);
+  return true;
+}
+
+bool venc_dev::venc_loaded_stop()
+{
+  struct timespec ts;
+  int status = 0;
+  if(ioctl (m_nDriver_fd,VEN_IOCTL_CMD_STOP, NULL) < 0)
+  {
+    DEBUG_PRINT_ERROR("ERROR: VEN_IOCTL_CMD_STOP failed");
+    return false;
+  }
+  if (clock_gettime(CLOCK_REALTIME, &ts) < 0)
+  {
+    DEBUG_PRINT_ERROR("%s: clock_gettime failed", __func__);
+    return false;
+  }
+  ts.tv_sec += 1;
+  pthread_mutex_lock(&loaded_start_stop_mlock);
+  DEBUG_PRINT_LOW("%s: wait on stop done", __func__);
+  status = pthread_cond_timedwait(&loaded_start_stop_cond,
+                &loaded_start_stop_mlock, &ts);
+  if (status != 0)
+  {
+    DEBUG_PRINT_ERROR("%s: error status = %d, %s", __func__,
+        status, strerror(status));
+    pthread_mutex_unlock(&loaded_start_stop_mlock);
+    return false;
+  }
+  DEBUG_PRINT_LOW("%s: wait over on stop done", __func__);
+  pthread_mutex_unlock(&loaded_start_stop_mlock);
+  DEBUG_PRINT_LOW("%s: venc_loaded_stop success", __func__);
+  return true;
+}
+
+bool venc_dev::venc_loaded_start_done()
+{
+  pthread_mutex_lock(&loaded_start_stop_mlock);
+  DEBUG_PRINT_LOW("%s: signal start done", __func__);
+  pthread_cond_signal(&loaded_start_stop_cond);
+  pthread_mutex_unlock(&loaded_start_stop_mlock);
+  return true;
+}
+
+bool venc_dev::venc_loaded_stop_done()
+{
+  pthread_mutex_lock(&loaded_start_stop_mlock);
+  DEBUG_PRINT_LOW("%s: signal stop done", __func__);
+  pthread_cond_signal(&loaded_start_stop_cond);
+  pthread_mutex_unlock(&loaded_start_stop_mlock);
+  return true;
+}
+
+bool venc_dev::venc_get_seq_hdr(void *buffer,
+    unsigned buffer_size, unsigned *header_len)
+{
+  struct venc_ioctl_msg ioctl_msg = {NULL,NULL};
+  int i = 0;
+  DEBUG_PRINT_HIGH("venc_dev::venc_get_seq_hdr");
+  venc_seqheader seq_in, seq_out;
+  seq_in.hdrlen = 0;
+  seq_in.bufsize = buffer_size;
+  seq_in.hdrbufptr = (unsigned char*)buffer;
+  if (seq_in.hdrbufptr == NULL) {
+    DEBUG_PRINT_ERROR("ERROR: malloc for sequence header failed");
+    return false;
+  }
+  DEBUG_PRINT_LOW("seq_in: buf=%x, sz=%d, hdrlen=%d", seq_in.hdrbufptr,
+    seq_in.bufsize, seq_in.hdrlen);
+
+  ioctl_msg.in = (void*)&seq_in;
+  ioctl_msg.out = (void*)&seq_out;
+  if(ioctl (m_nDriver_fd,VEN_IOCTL_GET_SEQUENCE_HDR,(void*)&ioctl_msg) < 0)
+  {
+    DEBUG_PRINT_ERROR("ERROR: Request for getting sequence header failed");
+    return false;
+  }
+  if (seq_out.hdrlen == 0) {
+    DEBUG_PRINT_ERROR("ERROR: Seq header returned zero length header");
+    DEBUG_PRINT_ERROR("seq_out: buf=%x, sz=%d, hdrlen=%d", seq_out.hdrbufptr,
+      seq_out.bufsize, seq_out.hdrlen);
+    return false;
+  }
+  *header_len = seq_out.hdrlen;
+  DEBUG_PRINT_LOW("seq_out: buf=%x, sz=%d, hdrlen=%d", seq_out.hdrbufptr,
+    seq_out.bufsize, seq_out.hdrlen);
+
+  return true;
 }
 
 bool venc_dev::venc_get_buf_req(unsigned long *min_buff_count,
@@ -856,6 +981,18 @@ bool venc_dev::venc_set_param(void *paramData,OMX_INDEXTYPE index )
       }
       break;
     }
+  case OMX_ExtraDataVideoEncoderSliceInfo:
+    {
+      DEBUG_PRINT_LOW("venc_set_param: OMX_ExtraDataVideoEncoderSliceInfo");
+      OMX_U32 extra_data = *(OMX_U32 *)paramData;
+      if(venc_set_extradata(extra_data) == false)
+      {
+         DEBUG_PRINT_ERROR("ERROR: Setting "
+            "OMX_QcomIndexParamIndexExtraDataType failed");
+         return false;
+      }
+      break;
+    }
   case OMX_IndexParamVideoSliceFMO:
   default:
 	  DEBUG_PRINT_ERROR("\nERROR: Unsupported parameter in venc_set_param: %u",
@@ -878,6 +1015,12 @@ bool venc_dev::venc_set_config(void *configData, OMX_INDEXTYPE index)
     {
       OMX_VIDEO_CONFIG_BITRATETYPE *bit_rate = (OMX_VIDEO_CONFIG_BITRATETYPE *)
         configData;
+      if(m_max_allowed_bitrate_check &&
+         !venc_max_allowed_bitrate_check(bit_rate->nEncodeBitrate))
+      {
+        DEBUG_PRINT_ERROR("Max Allowed Bitrate Check failed");
+        return false;
+      }
       DEBUG_PRINT_LOW("\n venc_set_config: OMX_IndexConfigVideoBitrate");
       if(bit_rate->nPortIndex == (OMX_U32)PORT_INDEX_OUT)
       {
@@ -1005,6 +1148,14 @@ unsigned venc_dev::venc_start(void)
     DEBUG_PRINT_HIGH("\n %s(): Driver Profile[%lu]/Level[%lu] successfully SET",
       __func__, codec_profile.profile, profile_level.level);
   }
+
+  if(m_max_allowed_bitrate_check &&
+     !venc_max_allowed_bitrate_check(bitrate.target_bitrate))
+  {
+    DEBUG_PRINT_ERROR("Maximum Allowed Bitrate Check failed");
+    return -1;
+  }
+
   venc_config_print();
 
 #ifdef MAX_RES_1080P
@@ -1076,7 +1227,7 @@ OMX_U32 venc_dev::pmem_allocate(OMX_U32 size, OMX_U32 alignment, OMX_U32 count)
   int rc = 0;
 
 #ifdef USE_ION
-  recon_buff[count].ion_device_fd = open (MEM_DEVICE,O_RDONLY|O_DSYNC);
+  recon_buff[count].ion_device_fd = open (MEM_DEVICE,O_RDONLY);
   if(recon_buff[count].ion_device_fd < 0)
   {
       DEBUG_PRINT_ERROR("\nERROR: ION Device open() Failed");
@@ -1084,7 +1235,8 @@ OMX_U32 venc_dev::pmem_allocate(OMX_U32 size, OMX_U32 alignment, OMX_U32 count)
   }
 
   recon_buff[count].alloc_data.len = size;
-  recon_buff[count].alloc_data.flags = 0x1 << MEM_HEAP_ID;
+  recon_buff[count].alloc_data.flags = (ION_HEAP(MEM_HEAP_ID) |
+                                        ION_HEAP(ION_IOMMU_HEAP_ID));
   recon_buff[count].alloc_data.align = clip2(alignment);
   if (recon_buff[count].alloc_data.align != 8192)
     recon_buff[count].alloc_data.align = 8192;
@@ -1514,6 +1666,21 @@ bool venc_dev::venc_fill_buf(void *buffer, void *pmem_data_buf)
   return true;
 }
 
+bool venc_dev::venc_set_extradata(OMX_U32 extra_data)
+{
+  venc_ioctl_msg ioctl_msg = {NULL,NULL};
+  DEBUG_PRINT_HIGH("venc_set_extradata:: %x", extra_data);
+  ioctl_msg.in = (void*)&extra_data;
+  ioctl_msg.out = NULL;
+  if(ioctl (m_nDriver_fd, VEN_IOCTL_SET_EXTRADATA, (void*)&ioctl_msg) < 0)
+  {
+    DEBUG_PRINT_ERROR("ERROR: Request for setting extradata failed");
+    return false;
+  }
+
+  return true;
+}
+
 bool venc_dev::venc_set_session_qp(OMX_U32 i_frame_qp, OMX_U32 p_frame_qp)
 {
   venc_ioctl_msg ioctl_msg = {NULL,NULL};
@@ -1553,6 +1720,14 @@ bool venc_dev::venc_set_profile_level(OMX_U32 eProfile,OMX_U32 eLevel)
   {
     DEBUG_PRINT_LOW("\n Profile/Level setting complete before venc_start");
     return true;
+  }
+
+  if(eProfile && eLevel)
+  {
+    /* non-zero values will be set by user, saving the same*/
+    m_eProfile = eProfile;
+    m_eLevel = eLevel;
+    DEBUG_PRINT_HIGH("Profile/Level set equal to %d/%d",m_eProfile, m_eLevel);
   }
 
   DEBUG_PRINT_LOW("\n Validating Profile/Level from table");
@@ -2599,6 +2774,82 @@ bool venc_dev::venc_validate_profile_level(OMX_U32 *eProfile, OMX_U32 *eLevel)
 
   return true;
 }
+
+bool venc_dev::venc_max_allowed_bitrate_check(OMX_U32 nTargetBitrate)
+{
+  unsigned const int *profile_tbl = NULL;
+
+  switch(m_sVenc_cfg.codectype)
+  {
+    case VEN_CODEC_MPEG4:
+      if(m_eProfile == OMX_VIDEO_MPEG4ProfileSimple)
+      {
+        profile_tbl = (unsigned int const *)mpeg4_profile_level_table;
+      }
+      else if(m_eProfile == OMX_VIDEO_MPEG4ProfileAdvancedSimple)
+      {
+        profile_tbl = (unsigned int const *)
+          (&mpeg4_profile_level_table[MPEG4_ASP_START]);
+      }
+      else
+      {
+        DEBUG_PRINT_ERROR("Unsupported MPEG4 profile type %lu", m_eProfile);
+        return false;
+      }
+      break;
+    case VEN_CODEC_H264:
+      if(m_eProfile == OMX_VIDEO_AVCProfileBaseline)
+      {
+        profile_tbl = (unsigned int const *)h264_profile_level_table;
+      }
+      else if(m_eProfile == OMX_VIDEO_AVCProfileHigh)
+      {
+        profile_tbl = (unsigned int const *)
+          (&h264_profile_level_table[H264_HP_START]);
+      }
+      else if(m_eProfile == OMX_VIDEO_AVCProfileMain)
+      {
+        profile_tbl = (unsigned int const *)
+          (&h264_profile_level_table[H264_MP_START]);
+      }
+      else
+      {
+        DEBUG_PRINT_ERROR("Unsupported AVC profile type %lu", m_eProfile);
+        return false;
+      }
+
+      break;
+    case VEN_CODEC_H263:
+      if(m_eProfile == OMX_VIDEO_H263ProfileBaseline)
+      {
+        profile_tbl = (unsigned int const *)h263_profile_level_table;
+      }
+      else
+      {
+        DEBUG_PRINT_ERROR("Unsupported H.263 profile type %lu", m_eProfile);
+        return false;
+      }
+      break;
+    default:
+      DEBUG_PRINT_ERROR("%s: unknown codec type", __func__);
+      return false;
+  }
+  while(profile_tbl[0] != 0)
+  {
+    if(profile_tbl[3] == m_eLevel)
+    {
+      if(nTargetBitrate > profile_tbl[2])
+      {
+         DEBUG_PRINT_ERROR("Max. supported bitrate for Profile[%d] & Level[%d]"
+            " is %u", m_eProfile, m_eLevel, profile_tbl[2]);
+        return false;
+      }
+    }
+    profile_tbl += 5;
+  }
+  return true;
+}
+
 #ifdef _ANDROID_ICS_
 bool venc_dev::venc_set_meta_mode(bool mode)
 {

@@ -1,5 +1,5 @@
 /*--------------------------------------------------------------------------
-Copyright (c) 2010-2011, Code Aurora Forum. All rights reserved.
+Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
 modification, are permitted provided that the following conditions are met:
@@ -183,6 +183,11 @@ public:
   virtual bool dev_empty_buf(void *, void *) = 0;
   virtual bool dev_fill_buf(void *buffer, void *) = 0;
   virtual bool dev_get_buf_req(OMX_U32 *,OMX_U32 *,OMX_U32 *,OMX_U32) = 0;
+  virtual bool dev_get_seq_hdr(void *, unsigned, unsigned *) = 0;
+  virtual bool dev_loaded_start(void) = 0;
+  virtual bool dev_loaded_stop(void) = 0;
+  virtual bool dev_loaded_start_done(void) = 0;
+  virtual bool dev_loaded_stop_done(void) = 0;
 #ifdef _ANDROID_ICS_
   void omx_release_meta_buffer(OMX_BUFFERHEADERTYPE *buffer);
 #endif
@@ -326,7 +331,9 @@ public:
     OMX_COMPONENT_OUTPUT_FLUSH_PENDING    =0x9,
     OMX_COMPONENT_INPUT_FLUSH_PENDING    =0xA,
     OMX_COMPONENT_PAUSE_PENDING          =0xB,
-    OMX_COMPONENT_EXECUTE_PENDING        =0xC
+    OMX_COMPONENT_EXECUTE_PENDING        =0xC,
+    OMX_COMPONENT_LOADED_START_PENDING = 0xD,
+    OMX_COMPONENT_LOADED_STOP_PENDING = 0xF,
 
   };
 
@@ -504,6 +511,8 @@ public:
   QOMX_VIDEO_INTRAPERIODTYPE m_sIntraperiod;
   OMX_VIDEO_PARAM_ERRORCORRECTIONTYPE m_sErrorCorrection;
   OMX_VIDEO_PARAM_INTRAREFRESHTYPE m_sIntraRefresh;
+  OMX_U32 m_sExtraData;
+  OMX_U32 m_sDebugSliceinfo;
 
   // fill this buffer queue
   omx_cmd_queue         m_ftb_q;
@@ -539,7 +548,7 @@ public:
 private:
 #ifdef USE_ION
   int alloc_map_ion_memory(int size,struct ion_allocation_data *alloc_data,
-                                    struct ion_fd_data *fd_data);
+                                    struct ion_fd_data *fd_data,int flag);
   void free_ion_memory(struct venc_ion *buf_ion_info);
 #endif
 };
